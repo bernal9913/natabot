@@ -3,17 +3,39 @@ import asyncio
 import lyricsgenius
 import random
 
-TOKEN = 'MTEwNDMzNzY1NDcxNzM2NjQxMg.GmcLB2.9ivlC3BQYsZ82IXlegPHxyD-Ri8q4cWiAQBU4k'
-#CHANNEL_ID = 1121662573666914326 # server test
-CHANNEL_ID = 1055403822266187847
-GENIUS_API_TOKEN = 'cOF1DgUx67gTgw5AyzRiQeq_lq6Mlw2iRuLlSEJ0zd7HiBVSSCP3okB4LRv67-G8'
+import spotipy
 
+# making the token isolation from the main file
+from config import (
+    SPOTIFY_CLIENT_ID,
+    SPOTIFY_CLIENT_SECRET,
+    GENIUS_ACCESS_TOKEN,
+    DISCORD_TOKEN,
+    CHANNEL_ID_LP,
+    CHANNEL_ID_PS,
+    CHANNEL_ID_VC
+)
 intents = discord.Intents.default()
 intents.typing = False
 intents.presences = False
 
 client = discord.Client(intents=intents)
-genius = lyricsgenius.Genius(GENIUS_API_TOKEN)
+genius = lyricsgenius.Genius(GENIUS_ACCESS_TOKEN)
+spotify = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET))
+running = """
+⠄⠄⣿⣿⣿⣿⠘⡿⢛⣿⣿⣿⣿⣿⣧⢻⣿⣿⠃⠸⣿⣿⣿⠄⠄⠄⠄⠄
+⠄⠄⣿⣿⣿⣿⢀⠼⣛⣛⣭⢭⣟⣛⣛⣛⠿⠿⢆⡠⢿⣿⣿⠄⠄⠄⠄⠄
+⠄⠄⠸⣿⣿⢣⢶⣟⣿⣖⣿⣷⣻⣮⡿⣽⣿⣻⣖⣶⣤⣭⡉⠄⠄⠄⠄⠄
+⠄⠄⠄⢹⠣⣛⣣⣭⣭⣭⣁⡛⠻⢽⣿⣿⣿⣿⢻⣿⣿⣿⣽⡧⡄⠄⠄⠄
+⠄⠄⠄⠄⣼⣿⣿⣿⣿⣿⣿⣿⣿⣶⣌⡛⢿⣽⢘⣿⣷⣿⡻⠏⣛⣀⠄⠄
+⠄⠄⠄⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⠙⡅⣿⠚⣡⣴⣿⣿⣿⡆⠄
+⠄⠄⣰⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⠄⣱⣾⣿⣿⣿⣿⣿⣿⠄
+⠄⢀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢸⣿⣿⣿⣿⣿⣿⣿⣿⠄
+⠄ ⣿⣿⣿ terrible, sushon?⣿⣿⣿⣿⣿⣿⠄
+⠄⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠛⠑⣿⣮⣝⣛⠿⠿⣿⣿⣿⣿⠄
+⢠⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⠄⠄⠄⠄⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠄
+"""
+# deprecated songs
 songs = [
     {'title': 'Diamantes', 'artist': 'Natanael Cano'},
     {'title': 'PRC', 'artist': 'Peso Pluma & Natanael Cano'},
@@ -30,7 +52,8 @@ songs = [
 @client.event
 async def on_ready():
     print('Bot conectado')
-    await send_lyrics()  # Llama a la función send_lyrics() cuando el bot esté listo
+    print(running)
+
 
 async def send_lyrics():
     await client.wait_until_ready()
@@ -53,4 +76,51 @@ async def send_lyrics():
 
         await asyncio.sleep(60)  # Espera 1 hora (3600 segundos)
 
-client.run(TOKEN)
+async def on_message(message):
+    if message.author == client.user:
+        return
+
+    if message.channel.id == CHANNEL_ID_VC and message.content.startswith('!pon '):
+        song_name = message.content[5:]  # Obtiene el nombre de la canción sin el prefijo "!pon "
+        track_uri = get_spotify_track_uri(song_name)
+
+        if track_uri is not None:
+            channel = message.channel
+            await channel.send("Reproduciendo la canción en el canal de voz...")
+            voice_channel = await connect_to_voice_channel(channel)
+            voice_channel.play(discord.FFmpegPCMAudio(executable="ffmpeg", source=spotify.track_audio_analysis(track_uri)))
+
+            while voice_channel.is_playing():
+                await asyncio.sleep(1)
+
+            await channel.send("Canción finalizada")
+            await voice_channel.disconnect()
+            await channel.send("Obteniendo la letra de la canción...")
+            lyrics = get_song_lyrics(song_name)
+            await channel.send("Letra de la canción:\n" + lyrics)
+        else:
+            await channel.send("No se encontró la canción en Spotify")
+
+def get_spotify_track_uri(song_name):
+    search_results = spotify.search(q=song_name, type='track', limit=1)
+
+    if search_results['tracks']['items']:
+        track_uri = search_results['tracks']['items'][0]['uri']
+        return track_uri
+    else:
+        return None
+
+async def connect_to_voice_channel(channel):
+    voice_channel = await channel.connect()
+    while not voice_channel.is_connected():
+        await asyncio.sleep(0.1)
+    return voice_channel
+
+def get_song_lyrics(song_name):
+    song = genius.search_song(song_name)
+    if song is not None:
+        return song.lyrics
+    else:
+        return "No se encontraron letras para esta canción"
+
+client.run(DISCORD_TOKEN)
