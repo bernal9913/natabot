@@ -2,8 +2,10 @@ import discord
 import asyncio
 import lyricsgenius
 import random
-
 import spotipy
+from discord_interactions import InteractionsClient
+from discord_slash import SlashCommand
+
 
 # making the token isolation from the main file
 from config import (
@@ -19,9 +21,13 @@ intents = discord.Intents.default()
 intents.typing = False
 intents.presences = False
 
-client = discord.Client(intents=intents)
 spotify = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET))
 genius = lyricsgenius.Genius(GENIUS_ACCESS_TOKEN)
+
+bot = discord.Client(intents=discord.Intents.default())
+client = InteractionsClient(bot, token=DISCORD_TOKEN)
+
+
 running = """
 ⠄⠄⣿⣿⣿⣿⠘⡿⢛⣿⣿⣿⣿⣿⣧⢻⣿⣿⠃⠸⣿⣿⣿⠄⠄⠄⠄⠄
 ⠄⠄⣿⣿⣿⣿⢀⠼⣛⣛⣭⢭⣟⣛⣛⣛⠿⠿⢆⡠⢿⣿⣿⠄⠄⠄⠄⠄
@@ -49,7 +55,20 @@ songs = [
     {'title': 'Soy el unico', 'artist': 'Yahritza y su escencia'}
 ]
 
-@client.event
+@client.command(
+    name="pon",
+    description="Reproducir canción y mostrar letra",
+    options=[
+        {
+            "name": "cancion",
+            "description": "Nombre de la canción",
+            "type": 3,  # String type
+            "required": True
+        }
+    ]
+)
+
+@bot.event
 async def on_ready():
     print('Bot conectado')
     print(running)
@@ -75,37 +94,28 @@ async def send_lyrics():
             await channel.send("No se encontraron letras para la canción")
 
         await asyncio.sleep(60)  # Espera 1 hora (3600 segundos)
+async def play_song(ctx, cancion):
+    track_uri = get_spotify_track_uri(cancion)
 
-@client.event
-async def on_message(message):
-    if message.author == client.user:
-        return
-    if message.content.startswith('test'):
-        await message.channel.send(running)
+    if track_uri is not None:
+        channel = ctx.author.voice.channel
+        if channel:
+            voice_channel = await channel.connect()
+            await ctx.send("Reproduciendo la canción en el canal de voz...")
+            voice_channel.play(discord.FFmpegPCMAudio(executable="ffmpeg", source=spotify.track_audio_analysis(track_uri)))
 
-    if message.content.startswith('!pon '):
-        song_name = message.content[5:]  # Obtiene el nombre de la canción sin el prefijo "!pon "
-        track_uri = get_spotify_track_uri(song_name)
+            while voice_channel.is_playing():
+                await asyncio.sleep(1)
 
-        if track_uri is not None:
-            channel = message.author.voice.channel
-            if channel:
-                voice_channel = await channel.connect()
-                await message.channel.send("Reproduciendo la canción en el canal de voz...")
-                voice_channel.play(discord.FFmpegPCMAudio(executable="ffmpeg", source=spotify.track_audio_analysis(track_uri)))
-
-                while voice_channel.is_playing():
-                    await asyncio.sleep(1)
-
-                await voice_channel.disconnect()
-                await message.channel.send("Canción finalizada")
-                await message.channel.send("Obteniendo la letra de la canción...")
-                lyrics = get_song_lyrics(song_name)
-                await message.channel.send("Letra de la canción:\n" + lyrics)
-            else:
-                await message.channel.send("Debes estar en un canal de voz para utilizar este comando.")
+            await voice_channel.disconnect()
+            await ctx.send("Canción finalizada")
+            await ctx.send("Obteniendo la letra de la canción...")
+            lyrics = get_song_lyrics(cancion)
+            await ctx.send("Letra de la canción:\n" + lyrics)
         else:
-            await message.channel.send("No se encontró la canción en Spotify")
+            await ctx.send("Debes estar en un canal de voz para utilizar este comando.")
+    else:
+        await ctx.send("No se encontró la canción en Spotify")
 
 def get_spotify_track_uri(song_name):
     search_results = spotify.search(q=song_name, type='track', limit=1)
@@ -123,4 +133,4 @@ def get_song_lyrics(song_name):
     else:
         return "No se encontraron letras para esta canción"
 
-client.run(DISCORD_TOKEN)
+bot.run(DISCORD_TOKEN)
