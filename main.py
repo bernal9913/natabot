@@ -20,8 +20,8 @@ intents.typing = False
 intents.presences = False
 
 client = discord.Client(intents=intents)
-genius = lyricsgenius.Genius(GENIUS_ACCESS_TOKEN)
 spotify = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET))
+genius = lyricsgenius.Genius(GENIUS_ACCESS_TOKEN)
 running = """
 ⠄⠄⣿⣿⣿⣿⠘⡿⢛⣿⣿⣿⣿⣿⣧⢻⣿⣿⠃⠸⣿⣿⣿⠄⠄⠄⠄⠄
 ⠄⠄⣿⣿⣿⣿⢀⠼⣛⣛⣭⢭⣟⣛⣛⣛⠿⠿⢆⡠⢿⣿⣿⠄⠄⠄⠄⠄
@@ -76,30 +76,36 @@ async def send_lyrics():
 
         await asyncio.sleep(60)  # Espera 1 hora (3600 segundos)
 
+@client.event
 async def on_message(message):
     if message.author == client.user:
         return
+    if message.content.startswith('test'):
+        await message.channel.send(running)
 
-    if message.channel.id == CHANNEL_ID_VC and message.content.startswith('!pon '):
+    if message.content.startswith('!pon '):
         song_name = message.content[5:]  # Obtiene el nombre de la canción sin el prefijo "!pon "
         track_uri = get_spotify_track_uri(song_name)
 
         if track_uri is not None:
-            channel = message.channel
-            await channel.send("Reproduciendo la canción en el canal de voz...")
-            voice_channel = await connect_to_voice_channel(channel)
-            voice_channel.play(discord.FFmpegPCMAudio(executable="ffmpeg", source=spotify.track_audio_analysis(track_uri)))
+            channel = message.author.voice.channel
+            if channel:
+                voice_channel = await channel.connect()
+                await message.channel.send("Reproduciendo la canción en el canal de voz...")
+                voice_channel.play(discord.FFmpegPCMAudio(executable="ffmpeg", source=spotify.track_audio_analysis(track_uri)))
 
-            while voice_channel.is_playing():
-                await asyncio.sleep(1)
+                while voice_channel.is_playing():
+                    await asyncio.sleep(1)
 
-            await channel.send("Canción finalizada")
-            await voice_channel.disconnect()
-            await channel.send("Obteniendo la letra de la canción...")
-            lyrics = get_song_lyrics(song_name)
-            await channel.send("Letra de la canción:\n" + lyrics)
+                await voice_channel.disconnect()
+                await message.channel.send("Canción finalizada")
+                await message.channel.send("Obteniendo la letra de la canción...")
+                lyrics = get_song_lyrics(song_name)
+                await message.channel.send("Letra de la canción:\n" + lyrics)
+            else:
+                await message.channel.send("Debes estar en un canal de voz para utilizar este comando.")
         else:
-            await channel.send("No se encontró la canción en Spotify")
+            await message.channel.send("No se encontró la canción en Spotify")
 
 def get_spotify_track_uri(song_name):
     search_results = spotify.search(q=song_name, type='track', limit=1)
@@ -109,12 +115,6 @@ def get_spotify_track_uri(song_name):
         return track_uri
     else:
         return None
-
-async def connect_to_voice_channel(channel):
-    voice_channel = await channel.connect()
-    while not voice_channel.is_connected():
-        await asyncio.sleep(0.1)
-    return voice_channel
 
 def get_song_lyrics(song_name):
     song = genius.search_song(song_name)
